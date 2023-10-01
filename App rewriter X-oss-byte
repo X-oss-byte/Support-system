@@ -1,0 +1,1591 @@
+App Router
+
+...
+
+next.config.js Options
+
+rewrites
+rewrites
+Rewrites allow you to map an incoming request path to a different destination path.
+Rewrites act as a URL proxy and mask the destination path, making it appear the user hasn't changed their location on the site. In contrast, redirects will reroute to a new page and show the URL changes.
+To use rewrites you can use the rewrites key in next.config.js:
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/about',
+        destination: '/',
+      },
+    ]
+  },
+}
+Rewrites are applied to client-side routing, a <Link href="/about"> will have the rewrite applied in the above example.
+rewrites is an async function that expects to return either an array or an object of arrays (see below) holding objects with source and destination properties:
+* 		source: String - is the incoming request path pattern.
+* 		destination: String is the path you want to route to.
+* 		basePath: false or undefined - if false the basePath won't be included when matching, can be used for external rewrites only.
+* 		locale: false or undefined - whether the locale should not be included when matching.
+* 		has is an array of has objects with the type, key and value properties.
+* 		missing is an array of missing objects with the type, key and value properties.
+When the rewrites function returns an array, rewrites are applied after checking the filesystem (pages and /public files) and before dynamic routes. When the rewrites function returns an object of arrays with a specific shape, this behavior can be changed and more finely controlled, as of v10.1 of Next.js:
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return {
+      beforeFiles: [
+        // These rewrites are checked after headers/redirects
+        // and before all files including _next/public files which
+        // allows overriding page files
+        {
+          source: '/some-page',
+          destination: '/somewhere-else',
+          has: [{ type: 'query', key: 'overrideMe' }],
+        },
+      ],
+      afterFiles: [
+        // These rewrites are checked after pages/public files
+        // are checked but before dynamic routes
+        {
+          source: '/non-existent',
+          destination: '/somewhere-else',
+        },
+      ],
+      fallback: [
+        // These rewrites are checked after both pages/public files
+        // and dynamic routes are checked
+        {
+          source: '/:path*',
+          destination: `https://my-old-site.com/:path*`,
+        },
+      ],
+    }
+  },
+}
+Good to know: rewrites in beforeFiles do not check the filesystem/dynamic routes immediately after matching a source, they continue until all beforeFiles have been checked.
+The order Next.js routes are checked is:
+* 		headers are checked/applied
+* 		redirects are checked/applied
+* 		beforeFiles rewrites are checked/applied
+* 		static files from the public directory, _next/static files, and non-dynamic pages are checked/served
+* 		afterFiles rewrites are checked/applied, if one of these rewrites is matched we check dynamic routes/static files after each match
+* 		fallback rewrites are checked/applied, these are applied before rendering the 404 page and after dynamic routes/all static assets have been checked. If you use fallback: true/'blocking' in getStaticPaths, the fallback rewrites defined in your next.config.js will not be run.
+Rewrite parameters
+
+When using parameters in a rewrite the parameters will be passed in the query by default when none of the parameters are used in the destination.
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/old-about/:path*',
+        destination: '/about', // The :path parameter isn't used here so will be automatically passed in the query
+      },
+    ]
+  },
+}
+If a parameter is used in the destination none of the parameters will be automatically passed in the query.
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/docs/:path*',
+        destination: '/:path*', // The :path parameter is used here so will not be automatically passed in the query
+      },
+    ]
+  },
+}
+You can still pass the parameters manually in the query if one is already used in the destination by specifying the query in the destination.
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/:first/:second',
+        destination: '/:first?second=:second',
+        // Since the :first parameter is used in the destination the :second parameter
+        // will not automatically be added in the query although we can manually add it
+        // as shown above
+      },
+    ]
+  },
+}
+Good to know: Static pages from Automatic Static Optimization or prerendering params from rewrites will be parsed on the client after hydration and provided in the query.
+Path Matching
+
+Path matches are allowed, for example /blog/:slug will match /blog/hello-world (no nested paths):
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/blog/:slug',
+        destination: '/news/:slug', // Matched parameters can be used in the destination
+      },
+    ]
+  },
+}
+Wildcard Path Matching
+
+To match a wildcard path you can use * after a parameter, for example /blog/:slug* will match /blog/a/b/c/d/hello-world:
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/blog/:slug*',
+        destination: '/news/:slug*', // Matched parameters can be used in the destination
+      },
+    ]
+  },
+}
+Regex Path Matching
+
+To match a regex path you can wrap the regex in parenthesis after a parameter, for example /blog/:slug(\\d{1,}) will match /blog/123 but not /blog/abc:
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/old-blog/:post(\\d{1,})',
+        destination: '/blog/:post', // Matched parameters can be used in the destination
+      },
+    ]
+  },
+}
+The following characters (, ), {, }, :, *, +, ? are used for regex path matching, so when used in the source as non-special values they must be escaped by adding \\ before them:
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        // this will match `/english(default)/something` being requested
+        source: '/english\\(default\\)/:slug',
+        destination: '/en-us/:slug',
+      },
+    ]
+  },
+}
+Header, Cookie, and Query Matching
+
+To only match a rewrite when header, cookie, or query values also match the has field or don't match the missing field can be used. Both the source and all has items must match and all missing items must not match for the rewrite to be applied.
+has and missing items can have the following fields:
+* 		type: String - must be either header, cookie, host, or query.
+* 		key: String - the key from the selected type to match against.
+* 		value: String or undefined - the value to check for, if undefined any value will match. A regex like string can be used to capture a specific part of the value, e.g. if the value first-(?<paramName>.*) is used for first-second then second will be usable in the destination with :paramName.
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      // if the header `x-rewrite-me` is present,
+      // this rewrite will be applied
+      {
+        source: '/:path*',
+        has: [
+          {
+            type: 'header',
+            key: 'x-rewrite-me',
+          },
+        ],
+        destination: '/another-page',
+      },
+      // if the header `x-rewrite-me` is not present,
+      // this rewrite will be applied
+      {
+        source: '/:path*',
+        missing: [
+          {
+            type: 'header',
+            key: 'x-rewrite-me',
+          },
+        ],
+        destination: '/another-page',
+      },
+      // if the source, query, and cookie are matched,
+      // this rewrite will be applied
+      {
+        source: '/specific/:path*',
+        has: [
+          {
+            type: 'query',
+            key: 'page',
+            // the page value will not be available in the
+            // destination since value is provided and doesn't
+            // use a named capture group e.g. (?<page>home)
+            value: 'home',
+          },
+          {
+            type: 'cookie',
+            key: 'authorized',
+            value: 'true',
+          },
+        ],
+        destination: '/:path*/home',
+      },
+      // if the header `x-authorized` is present and
+      // contains a matching value, this rewrite will be applied
+      {
+        source: '/:path*',
+        has: [
+          {
+            type: 'header',
+            key: 'x-authorized',
+            value: '(?<authorized>yes|true)',
+          },
+        ],
+        destination: '/home?authorized=:authorized',
+      },
+      // if the host is `example.com`,
+      // this rewrite will be applied
+      {
+        source: '/:path*',
+        has: [
+          {
+            type: 'host',
+            value: 'example.com',
+          },
+        ],
+        destination: '/another-page',
+      },
+    ]
+  },
+}
+Rewriting to an external URL
+
+Examples
+* 		Incremental adoption of Next.js
+* 		Using Multiple Zones
+Rewrites allow you to rewrite to an external url. This is especially useful for incrementally adopting Next.js. The following is an example rewrite for redirecting the /blog route of your main app to an external site.
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return [
+      {
+        source: '/blog',
+        destination: 'https://example.com/blog',
+      },
+      {
+        source: '/blog/:slug',
+        destination: 'https://example.com/blog/:slug', // Matched parameters can be used in the destination
+      },
+    ]
+  },
+}
+If you're using trailingSlash: true, you also need to insert a trailing slash in the source parameter. If the destination server is also expecting a trailing slash it should be included in the destination parameter as well.
+
+next.config.js
+
+
+module.exports = {
+  trailingSlash: true,
+  async rewrites() {
+    return [
+      {
+        source: '/blog/',
+        destination: 'https://example.com/blog/',
+      },
+      {
+        source: '/blog/:path*/',
+        destination: 'https://example.com/blog/:path*/',
+      },
+    ]
+  },
+}
+Incremental adoption of Next.js
+
+You can also have Next.js fall back to proxying to an existing website after checking all Next.js routes.
+This way you don't have to change the rewrites configuration when migrating more pages to Next.js
+
+next.config.js
+
+
+module.exports = {
+  async rewrites() {
+    return {
+      fallback: [
+        {
+          source: '/:path*',
+          destination: `https://custom-routes-proxying-endpoint.vercel.app/:path*`,
+        },
+      ],
+    }
+  },
+}
+Rewrites with basePath support
+
+When leveraging basePath support with rewrites each source and destination is automatically prefixed with the basePath unless you add basePath: false to the rewrite:
+
+next.config.js
+
+
+module.exports = {
+  basePath: '/docs',
+ 
+  async rewrites() {
+    return [
+      {
+        source: '/with-basePath', // automatically becomes /docs/with-basePath
+        destination: '/another', // automatically becomes /docs/another
+      },
+      {
+        // does not add /docs to /without-basePath since basePath: false is set
+        // Note: this can not be used for internal rewrites e.g. `destination: '/another'`
+        source: '/without-basePath',
+        destination: 'https://example.com',
+        basePath: false,
+      },
+    ]
+  },
+}
+Rewrites with i18n support
+
+When leveraging i18n support with rewrites each source and destination is automatically prefixed to handle the configured locales unless you add locale: false to the rewrite. If locale: false is used you must prefix the source and destination with a locale for it to be matched correctly.
+
+next.config.js
+
+
+module.exports = {
+  i18n: {
+    locales: ['en', 'fr', 'de'],
+    defaultLocale: 'en',
+  },
+ 
+  async rewrites() {
+    return [
+      {
+        source: '/with-locale', // automatically handles all locales
+        destination: '/another', // automatically passes the locale on
+      },
+      {
+        // does not handle locales automatically since locale: false is set
+        source: '/nl/with-locale-manual',
+        destination: '/nl/another',
+        locale: false,
+      },
+      {
+        // this matches '/' since `en` is the defaultLocale
+        source: '/en',
+        destination: '/en/another',
+        locale: false,
+      },
+      {
+        // it's possible to match all locales even when locale: false is set
+        source: '/:locale/api-alias/:path*',
+        destination: '/api/:path*',
+        locale: false,
+      },
+      {
+        // this gets converted to /(en|fr|de)/(.*) so will not match the top-level
+        // `/` or `/fr` routes like /:path* would
+        source: '/(.*)',
+        destination: '/another',
+      },
+    ]
+  },
+}
+Version History
+
+Version	Changes
+v13.3.0	missing added.
+v10.2.0	has added.
+v9.5.0	Headers added.
+Previous
+redirects
+
+Next
+serverComponentsExternalPackages
+
+ServerComponentsExternalPackages	
+	
+App Router
+
+...
+
+Rendering
+
+Server Components
+Server Components
+React Server Components allow you to write UI that can be rendered and optionally cached on the server. In Next.js, the rendering work is further split by route segments to enable streaming and partial rendering, and there are three different server rendering strategies:
+* 		Static Rendering
+* 		Dynamic Rendering
+* 		Streaming
+This page will go through how Server Components work, when you might use them, and the different server rendering strategies.
+Benefits of Server Rendering
+
+There are a couple of benefits to doing the rendering work on the server, including:
+* 		Data Fetching: Server Components allow you to move data fetching to the server, closer to your data source. This can improve performance by reducing time it takes to fetch data needed for rendering, and the amount of requests the client needs to make.
+* 		Security: Server Components allow you to keep sensitive data and logic on the server, such as tokens and API keys, without the risk of exposing them to the client.
+* 		Caching: By rendering on the server, the result can be cached and reused on subsequent requests and across users. This can improve performance and reduce cost by reducing the amount of rendering and data fetching done on each request.
+* 		Bundle Sizes: Server Components allow you to keep large dependencies that previously would impact the client JavaScript bundle size on the server. This is beneficial for users with slower internet or less powerful devices, as the client does not have to download, parse and execute any JavaScript for Server Components.
+* 		Initial Page Load and First Contentful Paint (FCP) : On the server, we can generate HTML to allow users to view the page immediately, without waiting for the client to download, parse and execute the JavaScript needed to render the page.
+* 		Search Engine Optimization and Social Network Shareability: The rendered HTML can be used by search engine bots to index your pages and social network bots to generate social card previews for your pages.
+* 		Streaming: Server Components allow you to split the rendering work into chunks and stream them to the client as they become ready. This allows the user to see parts of the page earlier without having to wait for the entire page to be rendered on the server.
+Using Server Components in Next.js
+
+By default, Next.js uses Server Components. This allows you to automatically implement server rendering with no additional configuration, and you can opt into using Client Components when needed, see Client Components.
+How are Server Components rendered?
+
+On the server, Next.js uses React's APIs to orchestrate rendering. The rendering work is split into chunks: by individual route segments and Suspense Boundaries
+
+.
+Each chunk is rendered in two steps:
+* 		React renders Server Components into a special data format called the React Server Component Payload (RSC Payload).
+* 		Next.js uses the RSC Payload and Client Component JavaScript instructions to render HTML on the server.
+Then, on the client:
+* 		The HTML is used to immediately show a fast non-interactive preview of the route - this is for the initial page load only.
+* 		The React Server Components Payload is used to reconcile the Client and Server Component trees, and update the DOM.
+* 		The JavaScript instructions are used to hydrate Client Components and make the application interactive.
+What is the React Server Component Payload (RSC)?
+The RSC Payload is a compact binary representation of the rendered React Server Components tree. It's used by React on the client to update the browser's DOM. The RSC Payload contains:
+* 		The rendered result of Server Components
+* 		Placeholders for where Client Components should be rendered and references to their JavaScript files
+* 		Any props passed from a Server Component to a Client Component
+Server Rendering Strategies
+
+There are three subsets of server rendering: Static, Dynamic, and Streaming.
+Static Rendering (Default)
+
+With Static Rendering, routes are rendered at build time, or in the background after data revalidation. The result is cached and can be pushed to a Content Delivery Network (CDN)
+
+. This optimization allows you to share the result of the rendering work between users and server requests.
+Static rendering is useful when a route has data that is not personalized to the user and can be known at build time, such as a static blog post or a product page.
+Dynamic Rendering
+
+With Dynamic Rendering, routes are rendered for each user at request time.
+Dynamic rendering is useful when a route has data that is personalized to the user or has information that can only be known at request time, such as cookies or the URL's search params.
+Dynamic Routes with Cached Data
+In most websites, routes are not fully static or fully dynamic - it's a spectrum. For example, you can have e-commerce page that uses cached product data that's revalidated at an interval, but also has uncached, personalized customer data.
+In Next.js, you can have dynamically rendered routes that have both cached and uncached data. This is because the RSC Payload and data are cached separetely. This allows you to opt into dynamic rendering without worrying about the performance impact of fetching all the data at request time.
+Learn more about the full-route cache and Data Cache.
+Switching to Dynamic Rendering
+
+During rendering, if a dynamic function or uncached data request is discovered, Next.js will switch to dynamically rendering the whole route. This table summarizes how dynamic functions and data caching affect whether a route is statically or dynamically rendered:
+Dynamic Functions	Data	Route
+No	Cached	Statically Rendered
+Yes	Cached	Dynamically Rendered
+No	Not Cached	Dynamically Rendered
+Yes	Not Cached	Dynamically Rendered
+In the table above, for a route to be fully static, all data must be cached. However, you can have a dynamically rendered route that uses both cached and uncached data fetches.
+As a developer, you do not need to choose between static and dynamic rendering as Next.js will automatically choose the best rendering strategy for each route based on the features and APIs used. Instead, you choose when to cache or revalidate specific data, and you may choose to stream parts of your UI.
+Dynamic Functions
+
+Dynamic functions rely on information that can only be known at request time such as a user's cookies, current requests headers, or the URL's search params. In Next.js, these dynamic functions are:
+* 		cookies() and headers(): Using these in a Server Component will opt the whole route into dynamic rendering at request time.
+* 		useSearchParams():
+    * 		In Client Components, it'll skip static rendering and instead render all Client Components up to the nearest parent Suspense boundary on the client.
+    * 		We recommend wrapping the Client Component that uses useSearchParams() in a <Suspense/> boundary. This will allow any Client Components above it to be statically rendered. Example.
+* 		searchParams: Using the Pages prop will opt the page into dynamic rendering at request time.
+Using any of these functions will opt the whole route into dynamic rendering at request time.
+Streaming
+
+
+
+
+With Streaming, routes are rendered on the server at request time. The work is split into chunks and streamed to the client as it becomes ready. This allows the user to see a preview of the page before it's fully rendered.
+
+
+
+Streaming is useful for lower-priority UI, or UI that depends on slower data fetches that would block rendering for the whole route. For example, reviews on a product page.
+In Next.js, you can stream route segments using loading.js, and UI components with React Suspense
+
+. See the Loading UI and Streaming docs for more information.
+Next Steps
+Learn how Next.js caches data and the result of static rendering.
+App Router
+
+Building Your Application
+Caching
+An overview of caching mechanisms in Next.js.
+Previous
+Rendering
+
+Next
+Client Components
+
+App Router
+
+Building Your Application
+
+Rendering
+Rendering
+Rendering converts the code you write into user interfaces. React and Next.js allow you to create hybrid web applications where parts of your code can be rendered on the server or the client. This section will help you understand the differences between these rendering environments, strategies, and runtimes.
+Fundamentals
+
+To start, it's helpful to be familiar with three foundational web concepts:
+* 		The Environments your application code can be executed in: the server and the client.
+* 		The Request-Response Lifecycle that's initiated when a user visits or interacts with your application.
+* 		The Network Boundary that separates server and client code.
+Rendering Environments
+
+There are two environments where web applications can be rendered: the client and the server.
+
+
+
+* 		The client refers to the browser on a user's device that sends a request to a server for your application code. It then turns the response from the server into a user interface.
+* 		The server refers to the computer in a data center that stores your application code, receives requests from a client, and sends back an appropriate response.
+Historically, developers had to use different languages (e.g. JavaScript, PHP) and frameworks when writing code for the server and the client. With React, developers can use the same language (JavaScript), and the same framework (e.g. Next.js or your framework of choice). This flexibility allows you to seamlessly write code for both environments without context switching.
+However, each environment has its own set of capabilities and constraints. Therefore, the code you write for the server and the client is not always the same. There are certain operations (e.g. data fetching or managing user state) that are better suited for one environment over the other.
+Understanding these differences is key to effectively using React and Next.js. We'll cover the differences and use cases in more detail on the Server and Client Components pages, for now, let's continue building on our foundation.
+Request-Response Lifecycle
+
+Broadly speaking, all websites follow the same Request-Response Lifecycle:
+* 		User Action: The user interacts with a web application. This could be clicking a link, submitting a form, or typing a URL directly into the browser's address bar.
+* 		HTTP Request: The client sends an HTTP request to the server that contains necessary information about what resources are being requested, what method is being used (e.g. GET, POST), and additional data if necessary.
+* 		Server: The server processes the request and responds with the appropriate resources. This process may take a couple of steps like routing, fetching data, etc.
+* 		HTTP Response: After processing the request, the server sends an HTTP response back to the client. This response contains a status code (which tells the client whether the request was successful or not) and requested resources (e.g. HTML, CSS, JavaScript, static assets, etc).
+* 		Client: The client parses the resources to render the user interface.
+* 		User Action: Once the user interface is rendered, the user can interact with it, and the whole process starts again.
+A major part of building a hybrid web application is deciding how to split the work in the lifecycle, and where to place the Network Boundary.
+Network Boundary
+
+In web development, the Network Boundary is a conceptual line that separates the different environments. For example, the client and the server, or the server and the data store.
+In React, you choose where to place the client-server network boundary wherever it makes the most sense.
+Behind the scenes, the work is split into two parts: the client module graph and the server module graph. The server module graph contains all the components that are rendered on the server, and the client module graph contains all components that are rendered on the client.
+It may be helpful to think about module graphs as a visual representation of how files in your application depend on each other.
+You can use the React "use client" convention to define the boundary. There's also a "use server" convention, which tells React to do some computational work on the server while on the client.
+Building Hybrid Applications
+
+When working in these environments, it's helpful to think of the flow of the code in your application as unidirectional. In other words, during a response, your application code flows in one direction: from the server to the client.
+If you need to access the server from the client, you send a new request to the server rather than re-use the same request. This makes it easier to understand where to render your components and where to place the Network Boundary.
+In practice, this model encourages developers to think about what they want to execute on the server first, before sending the result to the client and making the application interactive.
+This concept will become clearer when we look at how you can interleave client and server components in the same component tree.
+Server Components
+Learn how you can use React Server Components to render parts of your application on the server.
+Client Components
+Learn how to use Client Components to render parts of your application on the client.
+Composition Patterns
+Recommended patterns for using Server and Client Components.
+Edge and Node.js Runtimes
+Learn about the switchable runtimes (Edge and Node.js) in Next.js.
+Previous
+Forms and Mutations
+
+Next
+Server Components
+Sever components 	
+	
+
+Server Components
+React Server Components allow you to write UI that can be rendered and optionally cached on the server. In Next.js, the rendering work is further split by route segments to enable streaming and partial rendering, and there are three different server rendering strategies:
+* 		Static Rendering
+* 		Dynamic Rendering
+* 		Streaming
+This page will go through how Server Components work, when you might use them, and the different server rendering strategies.
+Benefits of Server Rendering
+
+There are a couple of benefits to doing the rendering work on the server, including:
+* 		Data Fetching: Server Components allow you to move data fetching to the server, closer to your data source. This can improve performance by reducing time it takes to fetch data needed for rendering, and the amount of requests the client needs to make.
+* 		Security: Server Components allow you to keep sensitive data and logic on the server, such as tokens and API keys, without the risk of exposing them to the client.
+* 		Caching: By rendering on the server, the result can be cached and reused on subsequent requests and across users. This can improve performance and reduce cost by reducing the amount of rendering and data fetching done on each request.
+* 		Bundle Sizes: Server Components allow you to keep large dependencies that previously would impact the client JavaScript bundle size on the server. This is beneficial for users with slower internet or less powerful devices, as the client does not have to download, parse and execute any JavaScript for Server Components.
+* 		Initial Page Load and First Contentful Paint (FCP) : On the server, we can generate HTML to allow users to view the page immediately, without waiting for the client to download, parse and execute the JavaScript needed to render the page.
+* 		Search Engine Optimization and Social Network Shareability: The rendered HTML can be used by search engine bots to index your pages and social network bots to generate social card previews for your pages.
+* 		Streaming: Server Components allow you to split the rendering work into chunks and stream them to the client as they become ready. This allows the user to see parts of the page earlier without having to wait for the entire page to be rendered on the server.
+Using Server Components in Next.js
+
+By default, Next.js uses Server Components. This allows you to automatically implement server rendering with no additional configuration, and you can opt into using Client Components when needed, see Client Components.
+How are Server Components rendered?
+
+On the server, Next.js uses React's APIs to orchestrate rendering. The rendering work is split into chunks: by individual route segments and Suspense Boundaries
+
+.
+Each chunk is rendered in two steps:
+* 		React renders Server Components into a special data format called the React Server Component Payload (RSC Payload).
+* 		Next.js uses the RSC Payload and Client Component JavaScript instructions to render HTML on the server.
+Then, on the client:
+* 		The HTML is used to immediately show a fast non-interactive preview of the route - this is for the initial page load only.
+* 		The React Server Components Payload is used to reconcile the Client and Server Component trees, and update the DOM.
+* 		The JavaScript instructions are used to hydrate Client Components and make the application interactive.
+What is the React Server Component Payload (RSC)?
+The RSC Payload is a compact binary representation of the rendered React Server Components tree. It's used by React on the client to update the browser's DOM. The RSC Payload contains:
+* 		The rendered result of Server Components
+* 		Placeholders for where Client Components should be rendered and references to their JavaScript files
+* 		Any props passed from a Server Component to a Client Component
+Server Rendering Strategies
+
+There are three subsets of server rendering: Static, Dynamic, and Streaming.
+Static Rendering (Default)
+
+With Static Rendering, routes are rendered at build time, or in the background after data revalidation. The result is cached and can be pushed to a Content Delivery Network (CDN)
+
+. This optimization allows you to share the result of the rendering work between users and server requests.
+Static rendering is useful when a route has data that is not personalized to the user and can be known at build time, such as a static blog post or a product page.
+Dynamic Rendering
+
+With Dynamic Rendering, routes are rendered for each user at request time.
+Dynamic rendering is useful when a route has data that is personalized to the user or has information that can only be known at request time, such as cookies or the URL's search params.
+Dynamic Routes with Cached Data
+In most websites, routes are not fully static or fully dynamic - it's a spectrum. For example, you can have e-commerce page that uses cached product data that's revalidated at an interval, but also has uncached, personalized customer data.
+In Next.js, you can have dynamically rendered routes that have both cached and uncached data. This is because the RSC Payload and data are cached separetely. This allows you to opt into dynamic rendering without worrying about the performance impact of fetching all the data at request time.
+Learn more about the full-route cache and Data Cache.
+Switching to Dynamic Rendering
+
+During rendering, if a dynamic function or uncached data request is discovered, Next.js will switch to dynamically rendering the whole route. This table summarizes how dynamic functions and data caching affect whether a route is statically or dynamically rendered:
+Dynamic Functions	Data	Route
+No	Cached	Statically Rendered
+Yes	Cached	Dynamically Rendered
+No	Not Cached	Dynamically Rendered
+Yes	Not Cached	Dynamically Rendered
+In the table above, for a route to be fully static, all data must be cached. However, you can have a dynamically rendered route that uses both cached and uncached data fetches.
+As a developer, you do not need to choose between static and dynamic rendering as Next.js will automatically choose the best rendering strategy for each route based on the features and APIs used. Instead, you choose when to cache or revalidate specific data, and you may choose to stream parts of your UI.
+Dynamic Functions
+
+Dynamic functions rely on information that can only be known at request time such as a user's cookies, current requests headers, or the URL's search params. In Next.js, these dynamic functions are:
+* 		cookies() and headers(): Using these in a Server Component will opt the whole route into dynamic rendering at request time.
+* 		useSearchParams():
+    * 		In Client Components, it'll skip static rendering and instead render all Client Components up to the nearest parent Suspense boundary on the client.
+    * 		We recommend wrapping the Client Component that uses useSearchParams() in a <Suspense/> boundary. This will allow any Client Components above it to be statically rendered. Example.
+* 		searchParams: Using the Pages prop will opt the page into dynamic rendering at request time.
+Using any of these functions will opt the whole route into dynamic rendering at request time.
+Streaming
+
+
+
+
+With Streaming, routes are rendered on the server at request time. The work is split into chunks and streamed to the client as it becomes ready. This allows the user to see a preview of the page before it's fully rendered.
+
+
+
+Streaming is useful for lower-priority UI, or UI that depends on slower data fetches that would block rendering for the whole route. For example, reviews on a product page.
+In Next.js, you can stream route segments using loading.js, and UI components with React Suspense
+
+. See the Loading UI and Streaming docs for more information.
+Next Steps
+Learn how Next.js caches data and the result of static rendering.
+App Router
+
+Building Your Application
+Caching
+An overview of caching mechanisms in Next.js.
+Previous
+Rendering
+
+Next
+Client Components
+Setting client components 	
+	
+
+App Router
+
+...
+
+Rendering
+
+Client Components
+Client Components
+Client Components allows you to write interactive UI that can be rendered on the client at request time. In Next.js, client rendering is opt-in, meaning you have to explicitly decide what components React should render on the client.
+This page will go through how Client Components work, how they're rendered, and when you might use them.
+Benefits of Client Rendering
+
+There are a couple of benefits to doing the rendering work on the client, including:
+* 		Interactivity: Client Components can use state, effects, and event listeners, meaning they can provide immediate feedback to the user and update the UI.
+* 		Browser APIs: Client Components have access to browser APIs, like geolocation or localStorage , allowing you to build UI for specific use cases.
+Using Client Components in Next.js
+
+To use Client Components, you can add the React "use client" directive
+
+at the top of a file, above your imports.
+"use client" is used to declare a boundary between a Server and Client Component modules. This means that by defining a "use client" in a file, all other modules imported into it, including child components, are considered part of the client bundle - and will be rendered by React on the client.
+
+app/counter.js
+JavaScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+ 
+export default function Counter() {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <div>
+      <p>You clicked {count} times</p>
+      <button onClick={() => setCount(count + 1)}>Click me</button>
+    </div>
+  )
+}
+The diagram below shows nested components, using onClick and useState in toggle.js will cause an error if the "use client" directive is not defined. This is because, by default, the components are rendered on the server where these APIs are not available. By defining the "use client" directive to toggle.js, you can tell React to render the component and its children on the client, where the APIs are available.
+
+
+
+Defining multiple use client entry points:
+You can define multiple "use client" entry points in your React Component tree. This allows you to split your application into multiple client bundles (or branches).
+However, "use client" doesn't need to be defined in every component that needs to be rendered on the client. Once you define the boundary, all child components and modules imported into it are considered part of the client bundle.
+How are Client Components Rendered?
+
+In Next.js, Client Components are rendered differently depending on whether the request is part of a full page load (an initial visit to your application or a page reload triggered by a browser refresh) or a subsequent navigation.
+Full page load
+
+To optimize the initial page load, Next.js will use React's APIs to render a static HTML preview on the server for both Client and Server Components. This means, when the user first visits your application, they will see the content of the page immediately, without having to wait for the client to download, parse, and execute the Client Component JavaScript bundle.
+On the server:
+* 		React renders Server Components into a special data format called the React Server Component Payload (RSC Payload), which includes references to Client Components.
+* 		Next.js uses the RSC Payload and Client Component JavaScript instructions to render HTML for the route on the server.
+Then, on the client:
+* 		The HTML is used to immediately show a fast non-interactive initial preview of the route.
+* 		The React Server Components Payload is used to reconcile the Client and Server Component trees, and update the DOM.
+* 		The JavaScript instructions are used to hydrate Client Components and make their UI interactive.
+What is hydration?
+Hydration is process of attaching event listeners to the DOM, to make the static HTML interactive. Behind the scenes, hydration is done with the hydrateRoot
+
+React API.
+Subsequent Navigations
+
+On subsequent navigations, Client Components are rendered entirely on the client, without the server-rendered HTML.
+This means the Client Component JavaScript bundle is downloaded and parsed. Once the bundle is ready, React will use the RSC Payload to reconcile the Client and Server Component trees, and update the DOM.
+Going back to the Server Environment
+
+Sometimes, after you've declared the "use client" boundary, you may want to go back to the server environment. For example, you may want to reduce the client bundle size, fetch data on the server, or use an API that is only available on the server.
+You can keep code on the server even though it's theoretically nested inside Client Components by interleaving Client and Server Components and Server Actions. See the Composition Patterns page for more information.
+Previous
+Server Components
+
+Next
+Composition Patterns
+Above ⬆️ code 👩‍💻 using typescript 	
+	
+
+App Router
+
+...
+
+Rendering
+
+Client Components
+Client Components
+Client Components allows you to write interactive UI that can be rendered on the client at request time. In Next.js, client rendering is opt-in, meaning you have to explicitly decide what components React should render on the client.
+This page will go through how Client Components work, how they're rendered, and when you might use them.
+Benefits of Client Rendering
+
+There are a couple of benefits to doing the rendering work on the client, including:
+* 		Interactivity: Client Components can use state, effects, and event listeners, meaning they can provide immediate feedback to the user and update the UI.
+* 		Browser APIs: Client Components have access to browser APIs, like geolocation or localStorage , allowing you to build UI for specific use cases.
+Using Client Components in Next.js
+
+To use Client Components, you can add the React "use client" directive
+
+at the top of a file, above your imports.
+"use client" is used to declare a boundary between a Server and Client Component modules. This means that by defining a "use client" in a file, all other modules imported into it, including child components, are considered part of the client bundle - and will be rendered by React on the client.
+
+app/counter.tsx
+TypeScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+ 
+export default function Counter() {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <div>
+      <p>You clicked {count} times</p>
+      <button onClick={() => setCount(count + 1)}>Click me</button>
+    </div>
+  )
+}
+The diagram below shows nested components, using onClick and useState in toggle.js will cause an error if the "use client" directive is not defined. This is because, by default, the components are rendered on the server where these APIs are not available. By defining the "use client" directive to toggle.js, you can tell React to render the component and its children on the client, where the APIs are available.
+
+
+
+Defining multiple use client entry points:
+You can define multiple "use client" entry points in your React Component tree. This allows you to split your application into multiple client bundles (or branches).
+However, "use client" doesn't need to be defined in every component that needs to be rendered on the client. Once you define the boundary, all child components and modules imported into it are considered part of the client bundle.
+How are Client Components Rendered?
+
+In Next.js, Client Components are rendered differently depending on whether the request is part of a full page load (an initial visit to your application or a page reload triggered by a browser refresh) or a subsequent navigation.
+Full page load
+
+To optimize the initial page load, Next.js will use React's APIs to render a static HTML preview on the server for both Client and Server Components. This means, when the user first visits your application, they will see the content of the page immediately, without having to wait for the client to download, parse, and execute the Client Component JavaScript bundle.
+On the server:
+* 		React renders Server Components into a special data format called the React Server Component Payload (RSC Payload), which includes references to Client Components.
+* 		Next.js uses the RSC Payload and Client Component JavaScript instructions to render HTML for the route on the server.
+Then, on the client:
+* 		The HTML is used to immediately show a fast non-interactive initial preview of the route.
+* 		The React Server Components Payload is used to reconcile the Client and Server Component trees, and update the DOM.
+* 		The JavaScript instructions are used to hydrate Client Components and make their UI interactive.
+What is hydration?
+Hydration is process of attaching event listeners to the DOM, to make the static HTML interactive. Behind the scenes, hydration is done with the hydrateRoot
+
+React API.
+Subsequent Navigations
+
+On subsequent navigations, Client Components are rendered entirely on the client, without the server-rendered HTML.
+This means the Client Component JavaScript bundle is downloaded and parsed. Once the bundle is ready, React will use the RSC Payload to reconcile the Client and Server Component trees, and update the DOM.
+Going back to the Server Environment
+
+Sometimes, after you've declared the "use client" boundary, you may want to go back to the server environment. For example, you may want to reduce the client bundle size, fetch data on the server, or use an API that is only available on the server.
+You can keep code on the server even though it's theoretically nested inside Client Components by interleaving Client and Server Components and Server Actions. See the Composition Patterns page for more information.
+Previous
+Server Components
+
+Next
+Composition Patterns
+Set composition patterns	
+	
+
+App Router
+
+...
+
+Rendering
+
+Composition Patterns
+Server and Client Composition Patterns
+When building React applications, you will need to consider what parts of your application should be rendered on the server or the client. This page covers some recommended composition patterns when using Server and Client Components.
+When to use Server and Client Components?
+
+Here's a quick summary of the different use cases for Server and Client Components:
+What do you need to do?	Server Component	Client Component
+Fetch data		
+Access backend resources (directly)		
+Keep sensitive information on the server (access tokens, API keys, etc)		
+Keep large dependencies on the server / Reduce client-side JavaScript		
+Add interactivity and event listeners (onClick(), onChange(), etc)		
+Use State and Lifecycle Effects (useState(), useReducer(), useEffect(), etc)		
+Use browser-only APIs		
+Use custom hooks that depend on state, effects, or browser-only APIs		
+Use React Class components		
+Server Component Patterns
+
+Before opting into client-side rendering, you may wish to do some work on the server like fetching data, or accessing your database or backend services.
+Here are some common patterns when working with Server Components:
+Sharing data between components
+
+When fetching data on the server, there may be cases where you need to share data across different components. For example, you may have a layout and a page that depend on the same data.
+Instead of using React Context
+
+(which is not available on the server) or passing data as props, you can use fetch or React's cache function to fetch the same data in the components that need it, without worrying about making duplicate requests for the same data. This is because React extends fetch to automatically memoize data requests, and the cache function can be used when fetch is not available.
+Learn more about memoization in React.
+Keeping Server-only Code out of the Client Environment
+
+Since JavaScript modules can be shared between both Server and Client Components modules, it's possible for code that was only ever intended to be run on the server to sneak its way into the client.
+For example, take the following data-fetching function:
+
+lib/data.js
+JavaScript
+
+
+
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+ 
+  return res.json()
+}
+At first glance, it appears that getData works on both the server and the client. However, this function contains an API_KEY, written with the intention that it would only ever be executed on the server.
+Since the environment variable API_KEY is not prefixed with NEXT_PUBLIC, it's a private variable that can only be accessed on the server. To prevent your environment variables from being leaked to the client, Next.js replaces private environment variables with an empty string.
+As a result, even though getData() can be imported and executed on the client, it won't work as expected. And while making the variable public would make the function work on the client, you may not want to expose sensitive information to the client.
+To prevent this sort of unintended client usage of server code, we can use the server-only package to give other developers a build-time error if they ever accidentally import one of these modules into a Client Component.
+To use server-only, first install the package:
+
+Terminal
+
+
+npm install server-only
+Then import the package into any module that contains server-only code:
+
+lib/data.js
+
+
+import 'server-only'
+ 
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+ 
+  return res.json()
+}
+Now, any Client Component that imports getData() will receive a build-time error explaining that this module can only be used on the server.
+The corresponding package client-only can be used to mark modules that contain client-only code – for example, code that accesses the window object.
+Using Third-party Packages and Providers
+
+Since Server Components are a new React feature, third-party packages and providers in the ecosystem are just beginning to add the "use client" directive to components that use client-only features like useState, useEffect, and createContext.
+Today, many components from npm packages that use client-only features do not yet have the directive. These third-party components will work as expected within Client Components since they have the "use client" directive, but they won't work within Server Components.
+For example, let's say you've installed the hypothetical acme-carousel package which has a <Carousel /> component. This component uses useState, but it doesn't yet have the "use client" directive.
+If you use <Carousel /> within a Client Component, it will work as expected:
+
+app/gallery.js
+JavaScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+import { Carousel } from 'acme-carousel'
+ 
+export default function Gallery() {
+  let [isOpen, setIsOpen] = useState(false)
+ 
+  return (
+    <div>
+      <button onClick={() => setIsOpen(true)}>View pictures</button>
+ 
+      {/*  Works, since Carousel is used within a Client Component */}
+      {isOpen && <Carousel />}
+    </div>
+  )
+}
+However, if you try to use it directly within a Server Component, you'll see an error:
+
+app/page.js
+JavaScript
+
+
+
+import { Carousel } from 'acme-carousel'
+ 
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+ 
+      {/*  Error: `useState` can not be used within Server Components */}
+      <Carousel />
+    </div>
+  )
+}
+This is because Next.js doesn't know <Carousel /> is using client-only features.
+To fix this, you can wrap third-party components that rely on client-only features in your own Client Components:
+
+app/carousel.js
+JavaScript
+
+
+
+'use client'
+ 
+import { Carousel } from 'acme-carousel'
+ 
+export default Carousel
+Now, you can use <Carousel /> directly within a Server Component:
+
+app/page.js
+JavaScript
+
+
+
+import Carousel from './carousel'
+ 
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+ 
+      {/*  Works, since Carousel is a Client Component */}
+      <Carousel />
+    </div>
+  )
+}
+We don't expect you to need to wrap most third-party components since it's likely you'll be using them within Client Components. However, one exception is providers, since they rely on React state and context, and are typically needed at the root of an application. Learn more about third-party context providers below.
+Using Context Providers
+
+Context providers are typically rendered near the root of an application to share global concerns, like the current theme. Since React context
+
+is not supported in Server Components, trying to create a context at the root of your application will cause an error:
+
+app/layout.js
+JavaScript
+
+
+
+import { createContext } from 'react'
+ 
+//  createContext is not supported in Server Components
+export const ThemeContext = createContext({})
+ 
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+      </body>
+    </html>
+  )
+}
+To fix this, create your context and render its provider inside of a Client Component:
+
+app/theme-provider.js
+JavaScript
+
+
+
+'use client'
+ 
+import { createContext } from 'react'
+ 
+export const ThemeContext = createContext({})
+ 
+export default function ThemeProvider({ children }) {
+  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+}
+Your Server Component will now be able to directly render your provider since it's been marked as a Client Component:
+
+app/layout.js
+JavaScript
+
+
+
+import ThemeProvider from './theme-provider'
+ 
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  )
+}
+With the provider rendered at the root, all other Client Components throughout your app will be able to consume this context.
+Good to know: You should render providers as deep as possible in the tree – notice how ThemeProvider only wraps {children} instead of the entire <html> document. This makes it easier for Next.js to optimize the static parts of your Server Components.
+Advice for Library Authors
+
+In a similar fashion, library authors creating packages to be consumed by other developers can use the "use client" directive to mark client entry points of their package. This allows users of the package to import package components directly into their Server Components without having to create a wrapping boundary.
+You can optimize your package by using 'use client' deeper in the tree, allowing the imported modules to be part of the Server Component module graph.
+It's worth noting some bundlers might strip out "use client" directives. You can find an example of how to configure esbuild to include the "use client" directive in the React Wrap Balancer
+
+and Vercel Analytics
+
+repositories.
+Client Components
+
+Moving Client Components Down the Tree
+
+To reduce the Client JavaScript bundle size, we recommend moving Client Components down your component tree.
+For example, you may have a Layout that has static elements (e.g. logo, links, etc) and an interactive search bar that uses state.
+Instead of making the whole layout a Client Component, move the interactive logic to a Client Component (e.g. <SearchBar />) and keep your layout as a Server Component. This means you don't have to send all the component Javascript of the layout to the client.
+
+app/layout.js
+JavaScript
+
+
+
+// SearchBar is a Client Component
+import SearchBar from './searchbar'
+// Logo is a Server Component
+import Logo from './logo'
+ 
+// Layout is a Server Component by default
+export default function Layout({ children }) {
+  return (
+    <>
+      <nav>
+        <Logo />
+        <SearchBar />
+      </nav>
+      <main>{children}</main>
+    </>
+  )
+}
+Passing props from Server to Client Components (Serialization)
+
+If you fetch data in a Server Component, you may want to pass data down as props to Client Components. Props passed from the Server to Client Components need to be serializable
+
+by React.
+If your Client Components depend on data that is not serializable, you can fetch data on the client with a third party library or on the server via a Route Handler.
+Interleaving Server and Client Components
+
+When interleaving Client and Server Components, it may be helpful to visualize your UI as a tree of components. Starting with the root layout, which is a Server Component, you can then render certain subtrees of components on the client by adding the "use client" directive.
+Within those client subtrees, you can still nest Server Components or call Server Actions, however there are some things to keep in mind:
+* 		During a request-response lifecycle, your code moves from the server to the client. If you need to access data or resources on the server while on the client, you'll be making a new request to the server - not switching back and forth.
+* 		When a new request is made to the server, all Server Components are rendered first, including those nested inside Client Components. The rendered result (RSC Payload) will contain references to the locations of Client Components. Then, on the client, React uses the RSC Payload to reconcile Server and Client Components into a single tree.
+* 		Since Client Components are rendered after Server Components, you cannot import a Server Component into a Client Component module (since it would require a new request back to the server). Instead, you can pass a Server Component as props to a Client Component. See the unsupported pattern and supported pattern sections below.
+Unsupported Pattern: Importing Server Components into Client Components
+
+The following pattern is not supported. You cannot import a Server Component into a Client Component:
+
+app/client-component.js
+JavaScript
+
+
+
+'use client'
+ 
+// You cannot import a Server Component into a Client Component.
+import ServerComponent from './Server-Component'
+ 
+export default function ClientComponent({ children }) {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <>
+      <button onClick={() => setCount(count + 1)}>{count}</button>
+ 
+      <ServerComponent />
+    </>
+  )
+}
+Supported Pattern: Passing Server Components to Client Components as Props
+
+The following pattern is supported. You can pass Server Components as a prop to a Client Component.
+A common pattern is to use the React children prop to create a "slot" in your Client Component.
+In the example below, <ClientComponent> accepts a children prop:
+
+app/client-component.js
+JavaScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+ 
+export default function ClientComponent({ children }) {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <>
+      <button onClick={() => setCount(count + 1)}>{count}</button>
+ 
+      {children}
+    </>
+  )
+}
+<ClientComponent> doesn't know that children will eventually be filled in by the result of a Server Component. The only responsibility <ClientComponent> has is to decide where children will eventually be placed.
+In a parent Server Component, you can import both the <ClientComponent> and <ServerComponent> and pass <ServerComponent> as a child of <ClientComponent>:
+
+app/page.js
+JavaScript
+
+
+
+// This pattern works:
+// You can pass a Server Component as a child or prop of a
+// Client Component.
+import ClientComponent from './client-component'
+import ServerComponent from './server-component'
+ 
+// Pages in Next.js are Server Components by default
+export default function Page() {
+  return (
+    <ClientComponent>
+      <ServerComponent />
+    </ClientComponent>
+  )
+}
+With this approach, <ClientComponent> and <ServerComponent> are decoupled and can be rendered independently. In this case, the child <ServerComponent> can be rendered on the server, well before <ClientComponent> is rendered on the client.
+Good to know:
+* 		The pattern of "lifting content up" has been used to avoid re-rendering a nested child component when a parent to re-renders.
+* 		You're not limited to the children prop. You can use any prop to pass JSX.
+Previous
+Client Components
+
+Next
+Edge and Node.js Runtimes
+Above ⬆️ code 👩‍💻 using typescript 	
+	
+
+Menu
+
+App Router
+
+...
+
+Rendering
+
+Composition Patterns
+Server and Client Composition Patterns
+When building React applications, you will need to consider what parts of your application should be rendered on the server or the client. This page covers some recommended composition patterns when using Server and Client Components.
+When to use Server and Client Components?
+
+Here's a quick summary of the different use cases for Server and Client Components:
+What do you need to do?	Server Component	Client Component
+Fetch data		
+Access backend resources (directly)		
+Keep sensitive information on the server (access tokens, API keys, etc)		
+Keep large dependencies on the server / Reduce client-side JavaScript		
+Add interactivity and event listeners (onClick(), onChange(), etc)		
+Use State and Lifecycle Effects (useState(), useReducer(), useEffect(), etc)		
+Use browser-only APIs		
+Use custom hooks that depend on state, effects, or browser-only APIs		
+Use React Class components		
+Server Component Patterns
+
+Before opting into client-side rendering, you may wish to do some work on the server like fetching data, or accessing your database or backend services.
+Here are some common patterns when working with Server Components:
+Sharing data between components
+
+When fetching data on the server, there may be cases where you need to share data across different components. For example, you may have a layout and a page that depend on the same data.
+Instead of using React Context
+
+(which is not available on the server) or passing data as props, you can use fetch or React's cache function to fetch the same data in the components that need it, without worrying about making duplicate requests for the same data. This is because React extends fetch to automatically memoize data requests, and the cache function can be used when fetch is not available.
+Learn more about memoization in React.
+Keeping Server-only Code out of the Client Environment
+
+Since JavaScript modules can be shared between both Server and Client Components modules, it's possible for code that was only ever intended to be run on the server to sneak its way into the client.
+For example, take the following data-fetching function:
+
+lib/data.ts
+TypeScript
+
+
+
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+ 
+  return res.json()
+}
+At first glance, it appears that getData works on both the server and the client. However, this function contains an API_KEY, written with the intention that it would only ever be executed on the server.
+Since the environment variable API_KEY is not prefixed with NEXT_PUBLIC, it's a private variable that can only be accessed on the server. To prevent your environment variables from being leaked to the client, Next.js replaces private environment variables with an empty string.
+As a result, even though getData() can be imported and executed on the client, it won't work as expected. And while making the variable public would make the function work on the client, you may not want to expose sensitive information to the client.
+To prevent this sort of unintended client usage of server code, we can use the server-only package to give other developers a build-time error if they ever accidentally import one of these modules into a Client Component.
+To use server-only, first install the package:
+
+Terminal
+
+
+npm install server-only
+Then import the package into any module that contains server-only code:
+
+lib/data.js
+
+
+import 'server-only'
+ 
+export async function getData() {
+  const res = await fetch('https://external-service.com/data', {
+    headers: {
+      authorization: process.env.API_KEY,
+    },
+  })
+ 
+  return res.json()
+}
+Now, any Client Component that imports getData() will receive a build-time error explaining that this module can only be used on the server.
+The corresponding package client-only can be used to mark modules that contain client-only code – for example, code that accesses the window object.
+Using Third-party Packages and Providers
+
+Since Server Components are a new React feature, third-party packages and providers in the ecosystem are just beginning to add the "use client" directive to components that use client-only features like useState, useEffect, and createContext.
+Today, many components from npm packages that use client-only features do not yet have the directive. These third-party components will work as expected within Client Components since they have the "use client" directive, but they won't work within Server Components.
+For example, let's say you've installed the hypothetical acme-carousel package which has a <Carousel /> component. This component uses useState, but it doesn't yet have the "use client" directive.
+If you use <Carousel /> within a Client Component, it will work as expected:
+
+app/gallery.tsx
+TypeScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+import { Carousel } from 'acme-carousel'
+ 
+export default function Gallery() {
+  let [isOpen, setIsOpen] = useState(false)
+ 
+  return (
+    <div>
+      <button onClick={() => setIsOpen(true)}>View pictures</button>
+ 
+      {/* Works, since Carousel is used within a Client Component */}
+      {isOpen && <Carousel />}
+    </div>
+  )
+}
+However, if you try to use it directly within a Server Component, you'll see an error:
+
+app/page.tsx
+TypeScript
+
+
+
+import { Carousel } from 'acme-carousel'
+ 
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+ 
+      {/* Error: `useState` can not be used within Server Components */}
+      <Carousel />
+    </div>
+  )
+}
+This is because Next.js doesn't know <Carousel /> is using client-only features.
+To fix this, you can wrap third-party components that rely on client-only features in your own Client Components:
+
+app/carousel.tsx
+TypeScript
+
+
+
+'use client'
+ 
+import { Carousel } from 'acme-carousel'
+ 
+export default Carousel
+Now, you can use <Carousel /> directly within a Server Component:
+
+app/page.tsx
+TypeScript
+
+
+
+import Carousel from './carousel'
+ 
+export default function Page() {
+  return (
+    <div>
+      <p>View pictures</p>
+ 
+      {/*  Works, since Carousel is a Client Component */}
+      <Carousel />
+    </div>
+  )
+}
+We don't expect you to need to wrap most third-party components since it's likely you'll be using them within Client Components. However, one exception is providers, since they rely on React state and context, and are typically needed at the root of an application. Learn more about third-party context providers below.
+Using Context Providers
+
+Context providers are typically rendered near the root of an application to share global concerns, like the current theme. Since React context
+
+is not supported in Server Components, trying to create a context at the root of your application will cause an error:
+
+app/layout.tsx
+TypeScript
+
+
+
+import { createContext } from 'react'
+ 
+//  createContext is not supported in Server Components
+export const ThemeContext = createContext({})
+ 
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+      </body>
+    </html>
+  )
+}
+To fix this, create your context and render its provider inside of a Client Component:
+
+app/theme-provider.tsx
+TypeScript
+
+
+
+'use client'
+ 
+import { createContext } from 'react'
+ 
+export const ThemeContext = createContext({})
+ 
+export default function ThemeProvider({ children }) {
+  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+}
+Your Server Component will now be able to directly render your provider since it's been marked as a Client Component:
+
+app/layout.tsx
+TypeScript
+
+
+
+import ThemeProvider from './theme-provider'
+ 
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  )
+}
+With the provider rendered at the root, all other Client Components throughout your app will be able to consume this context.
+Good to know: You should render providers as deep as possible in the tree – notice how ThemeProvider only wraps {children} instead of the entire <html> document. This makes it easier for Next.js to optimize the static parts of your Server Components.
+Advice for Library Authors
+
+In a similar fashion, library authors creating packages to be consumed by other developers can use the "use client" directive to mark client entry points of their package. This allows users of the package to import package components directly into their Server Components without having to create a wrapping boundary.
+You can optimize your package by using 'use client' deeper in the tree, allowing the imported modules to be part of the Server Component module graph.
+It's worth noting some bundlers might strip out "use client" directives. You can find an example of how to configure esbuild to include the "use client" directive in the React Wrap Balancer
+
+and Vercel Analytics
+
+repositories.
+Client Components
+
+Moving Client Components Down the Tree
+
+To reduce the Client JavaScript bundle size, we recommend moving Client Components down your component tree.
+For example, you may have a Layout that has static elements (e.g. logo, links, etc) and an interactive search bar that uses state.
+Instead of making the whole layout a Client Component, move the interactive logic to a Client Component (e.g. <SearchBar />) and keep your layout as a Server Component. This means you don't have to send all the component Javascript of the layout to the client.
+
+app/layout.tsx
+TypeScript
+
+
+
+// SearchBar is a Client Component
+import SearchBar from './searchbar'
+// Logo is a Server Component
+import Logo from './logo'
+ 
+// Layout is a Server Component by default
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <nav>
+        <Logo />
+        <SearchBar />
+      </nav>
+      <main>{children}</main>
+    </>
+  )
+}
+Passing props from Server to Client Components (Serialization)
+
+If you fetch data in a Server Component, you may want to pass data down as props to Client Components. Props passed from the Server to Client Components need to be serializable
+
+by React.
+If your Client Components depend on data that is not serializable, you can fetch data on the client with a third party library or on the server via a Route Handler.
+Interleaving Server and Client Components
+
+When interleaving Client and Server Components, it may be helpful to visualize your UI as a tree of components. Starting with the root layout, which is a Server Component, you can then render certain subtrees of components on the client by adding the "use client" directive.
+Within those client subtrees, you can still nest Server Components or call Server Actions, however there are some things to keep in mind:
+* 		During a request-response lifecycle, your code moves from the server to the client. If you need to access data or resources on the server while on the client, you'll be making a new request to the server - not switching back and forth.
+* 		When a new request is made to the server, all Server Components are rendered first, including those nested inside Client Components. The rendered result (RSC Payload) will contain references to the locations of Client Components. Then, on the client, React uses the RSC Payload to reconcile Server and Client Components into a single tree.
+* 		Since Client Components are rendered after Server Components, you cannot import a Server Component into a Client Component module (since it would require a new request back to the server). Instead, you can pass a Server Component as props to a Client Component. See the unsupported pattern and supported pattern sections below.
+Unsupported Pattern: Importing Server Components into Client Components
+
+The following pattern is not supported. You cannot import a Server Component into a Client Component:
+
+app/client-component.tsx
+TypeScript
+
+
+
+'use client'
+ 
+// You cannot import a Server Component into a Client Component.
+import ServerComponent from './Server-Component'
+ 
+export default function ClientComponent({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <>
+      <button onClick={() => setCount(count + 1)}>{count}</button>
+ 
+      <ServerComponent />
+    </>
+  )
+}
+Supported Pattern: Passing Server Components to Client Components as Props
+
+The following pattern is supported. You can pass Server Components as a prop to a Client Component.
+A common pattern is to use the React children prop to create a "slot" in your Client Component.
+In the example below, <ClientComponent> accepts a children prop:
+
+app/client-component.tsx
+TypeScript
+
+
+
+'use client'
+ 
+import { useState } from 'react'
+ 
+export default function ClientComponent({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const [count, setCount] = useState(0)
+ 
+  return (
+    <>
+      <button onClick={() => setCount(count + 1)}>{count}</button>
+      {children}
+    </>
+  )
+}
+<ClientComponent> doesn't know that children will eventually be filled in by the result of a Server Component. The only responsibility <ClientComponent> has is to decide where children will eventually be placed.
+In a parent Server Component, you can import both the <ClientComponent> and <ServerComponent> and pass <ServerComponent> as a child of <ClientComponent>:
+
+app/page.tsx
+TypeScript
+
+
+
+// This pattern works:
+// You can pass a Server Component as a child or prop of a
+// Client Component.
+import ClientComponent from './client-component'
+import ServerComponent from './server-component'
+ 
+// Pages in Next.js are Server Components by default
+export default function Page() {
+  return (
+    <ClientComponent>
+      <ServerComponent />
+    </ClientComponent>
+  )
+}
+With this approach, <ClientComponent> and <ServerComponent> are decoupled and can be rendered independently. In this case, the child <ServerComponent> can be rendered on the server, well before <ClientComponent> is rendered on the client.
+Good to know:
+* 		The pattern of "lifting content up" has been used to avoid re-rendering a nested child component when a parent to re-renders.
+* 		You're not limited to the children prop. You can use any prop to pass JSX.
+Previous
+Client Components
+
+Next
+Edge and Node.js Runtimes
