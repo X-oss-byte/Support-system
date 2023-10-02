@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "author": "RedQ, Inc.",
   "dependencies": {
-    "framer-motion": "^4.1.17",
+    "framer-motion": "^10.0.0",
     "gatsby": "^5.0.0",
     "gatsby-image": "^3.11.0",
     "gatsby-plugin-google-analytics": "^3.12.0",
