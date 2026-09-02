@@ -31,6 +31,6 @@
     "imagemin-mozjpeg": "^9.0.0",
     "imagemin-optipng": "^8.0.0",
     "imagemin-svgo": "^8.0.0",
-    "next-sitemap": "^1.2.22"
+    "next-sitemap": "^4.0.0"
   }
 }
